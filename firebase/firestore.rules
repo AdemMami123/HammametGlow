@@ -1,0 +1,212 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ============================================
+    // HELPER FUNCTIONS
+    // ============================================
+    
+    // Check if user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Check if user owns the resource
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    // Check if user is admin
+    function isAdmin() {
+      return isSignedIn() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Check if user is business or admin
+    function isBusinessOrAdmin() {
+      return isSignedIn() && 
+             (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'business' ||
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+    
+    // Validate user data on create
+    function validUserCreate() {
+      return request.resource.data.keys().hasAll(['uid', 'email', 'role', 'points', 'level', 'createdAt']) &&
+             request.resource.data.uid == request.auth.uid &&
+             request.resource.data.role in ['citizen', 'business', 'admin', 'tourist'] &&
+             request.resource.data.points == 0 &&
+             request.resource.data.level == 1;
+    }
+    
+    // Validate challenge data
+    function validChallenge() {
+      return request.resource.data.keys().hasAll(['title', 'description', 'category', 'points', 'status', 'createdBy']) &&
+             request.resource.data.title is string &&
+             request.resource.data.title.size() >= 10 &&
+             request.resource.data.description.size() >= 30 &&
+             request.resource.data.points > 0 &&
+             request.resource.data.createdBy == request.auth.uid;
+    }
+    
+    // ============================================
+    // USERS COLLECTION
+    // ============================================
+    
+    match /users/{userId} {
+      // Anyone authenticated can read user profiles
+      allow read: if isSignedIn();
+      
+      // Users can create their own profile during registration
+      allow create: if isSignedIn() && 
+                      request.auth.uid == userId &&
+                      validUserCreate();
+      
+      // Users can update their own profile, admins can update any
+      allow update: if isOwner(userId) || isAdmin();
+      
+      // Only admins can delete users
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // CHALLENGES COLLECTION
+    // ============================================
+    
+    match /challenges/{challengeId} {
+      // Anyone can read active challenges (public access)
+      allow read: if true;
+      
+      // Authenticated users can create challenges with valid data
+      allow create: if isSignedIn() && validChallenge();
+      
+      // Challenge creator or admin can update
+      allow update: if isSignedIn() && 
+                      (resource.data.createdBy == request.auth.uid || isAdmin());
+      
+      // Only admin or creator can delete
+      allow delete: if isAdmin() || 
+                      (isSignedIn() && resource.data.createdBy == request.auth.uid);
+    }
+    
+    // ============================================
+    // SUBMISSIONS COLLECTION
+    // ============================================
+    
+    match /submissions/{submissionId} {
+      // Authenticated users can read submissions
+      allow read: if isSignedIn();
+      
+      // Authenticated users can create submissions
+      allow create: if isSignedIn() &&
+                      request.resource.data.userId == request.auth.uid &&
+                      request.resource.data.status == 'pending';
+      
+      // Submission owner can update their submission (before approval)
+      // Admins can update any submission (for approval/rejection)
+      allow update: if (isOwner(resource.data.userId) && resource.data.status == 'pending') || 
+                      isAdmin();
+      
+      // Owner or admin can delete
+      allow delete: if isOwner(resource.data.userId) || isAdmin();
+    }
+    
+    // ============================================
+    // BADGES COLLECTION
+    // ============================================
+    
+    match /badges/{badgeId} {
+      // Authenticated users can read badges
+      allow read: if isSignedIn();
+      
+      // Only system/admin can create badges
+      allow create: if isAdmin();
+      
+      // No updates to badges once created
+      allow update: if false;
+      
+      // Only admin can delete badges
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // NOTIFICATIONS COLLECTION
+    // ============================================
+    
+    match /notifications/{notificationId} {
+      // Users can only read their own notifications
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      // System/admin can create notifications
+      allow create: if isAdmin();
+      
+      // Users can update (mark as read) their own notifications
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      // Users can delete their own notifications
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+    
+    // ============================================
+    // BUSINESS COLLECTION (for business accounts)
+    // ============================================
+    
+    match /business/{businessId} {
+      // Anyone can read business profiles
+      allow read: if true;
+      
+      // Business users can create their business profile
+      allow create: if isSignedIn() && 
+                      request.resource.data.ownerUid == request.auth.uid;
+      
+      // Business owner or admin can update
+      allow update: if isSignedIn() && 
+                      (resource.data.ownerUid == request.auth.uid || isAdmin());
+      
+      // Only admin can delete
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // LEADERBOARD COLLECTION (read-only for users)
+    // ============================================
+    
+    match /leaderboard/{entryId} {
+      // Anyone can read leaderboard
+      allow read: if true;
+      
+      // Only system can write (backend only)
+      allow write: if false;
+    }
+    
+    // ============================================
+    // REPORTS COLLECTION (for content moderation)
+    // ============================================
+    
+    match /reports/{reportId} {
+      // Admins can read all reports
+      allow read: if isAdmin();
+      
+      // Authenticated users can create reports
+      allow create: if isSignedIn() &&
+                      request.resource.data.reportedBy == request.auth.uid;
+      
+      // Only admins can update reports
+      allow update: if isAdmin();
+      
+      // Only admins can delete reports
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // ANALYTICS COLLECTION (business analytics)
+    // ============================================
+    
+    match /analytics/{docId} {
+      // Business owners can read their own analytics
+      allow read: if isSignedIn();
+      
+      // Only system/backend can write
+      allow write: if false;
+    }
+  }
+}

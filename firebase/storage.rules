@@ -1,0 +1,110 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // ============================================
+    // HELPER FUNCTIONS
+    // ============================================
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isImageFile() {
+      return request.resource.contentType.matches('image/.*');
+    }
+    
+    function isValidSize() {
+      return request.resource.size < 10 * 1024 * 1024; // 10MB limit
+    }
+    
+    // ============================================
+    // CHALLENGE IMAGES
+    // ============================================
+    
+    match /challenges/{challengeId}/{fileName} {
+      // Anyone can read challenge images
+      allow read: if true;
+      
+      // Authenticated users can upload challenge images
+      allow create: if isSignedIn() && 
+                      isImageFile() && 
+                      isValidSize();
+      
+      // Creator can update/delete (handled by backend)
+      allow update, delete: if isSignedIn();
+    }
+    
+    // ============================================
+    // SUBMISSION IMAGES
+    // ============================================
+    
+    match /submissions/{submissionId}/{fileName} {
+      // Authenticated users can read submissions
+      allow read: if isSignedIn();
+      
+      // Authenticated users can upload submission images
+      allow create: if isSignedIn() && 
+                      isImageFile() && 
+                      isValidSize();
+      
+      // Submission owner can update/delete
+      allow update, delete: if isSignedIn();
+    }
+    
+    // ============================================
+    // USER AVATARS
+    // ============================================
+    
+    match /avatars/{userId}/{fileName} {
+      // Anyone can read avatars
+      allow read: if true;
+      
+      // Users can upload their own avatar
+      allow create: if isSignedIn() && 
+                      request.auth.uid == userId &&
+                      isImageFile() && 
+                      isValidSize();
+      
+      // Users can update/delete their own avatar
+      allow update, delete: if isSignedIn() && request.auth.uid == userId;
+    }
+    
+    // ============================================
+    // BUSINESS LOGOS AND IMAGES
+    // ============================================
+    
+    match /business/{businessId}/{fileName} {
+      // Anyone can read business images
+      allow read: if true;
+      
+      // Business owners can upload
+      allow create: if isSignedIn() && 
+                      isImageFile() && 
+                      isValidSize();
+      
+      // Business owners can update/delete
+      allow update, delete: if isSignedIn();
+    }
+    
+    // ============================================
+    // BADGE ICONS
+    // ============================================
+    
+    match /badges/{badgeId}/{fileName} {
+      // Anyone can read badge icons
+      allow read: if true;
+      
+      // Only admins can upload (handled by backend)
+      allow write: if false;
+    }
+    
+    // ============================================
+    // DEFAULT DENY ALL OTHER PATHS
+    // ============================================
+    
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,16 @@
+# Node modules
+node_modules/
+
+# Next.js build output
+.next/
+
+# Local env files
+.env
+.env.local
+.env.*.local
+
+# VSCode
+.vscode/
+
+# Mac
+.DS_Store
