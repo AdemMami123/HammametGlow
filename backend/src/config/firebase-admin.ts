@@ -42,32 +42,66 @@ const fileCred = loadServiceAccountFromFile();
 const envCred = loadServiceAccountFromEnv();
 const serviceAccount = fileCred || envCred;
 
+// TypeScript types for exported services
+export type AdminAuth = admin.auth.Auth;
+export type AdminDb = admin.firestore.Firestore;
+export type AdminStorage = admin.storage.Storage;
+
 // Exports (create safe fallbacks to avoid runtime crashes when creds are missing)
 let adminAuth: admin.auth.Auth;
 let adminDb: admin.firestore.Firestore;
 let adminStorage: admin.storage.Storage;
 
-if (serviceAccount && serviceAccount.private_key && serviceAccount.client_email) {
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount as admin.ServiceAccount),
-      projectId: serviceAccount.project_id || process.env.FIREBASE_PROJECT_ID,
-    });
-    console.log('✅ Firebase Admin initialized successfully');
-  }
-
+// Prevent re-initialization check
+if (admin.apps.length > 0) {
+  console.log('♻️  Firebase Admin already initialized, using existing instance');
   adminAuth = admin.auth();
   adminDb = admin.firestore();
   adminStorage = admin.storage();
+} else if (serviceAccount && serviceAccount.private_key && serviceAccount.client_email) {
+  try {
+    // Initialize Firebase Admin SDK
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount as admin.ServiceAccount),
+      projectId: serviceAccount.project_id || process.env.FIREBASE_PROJECT_ID,
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    });
+    
+    console.log('✅ Firebase Admin initialized successfully');
+    console.log(`   Project ID: ${serviceAccount.project_id || process.env.FIREBASE_PROJECT_ID}`);
+    console.log(`   Service Account: ${serviceAccount.client_email}`);
+
+    // Initialize services
+    adminAuth = admin.auth();
+    adminDb = admin.firestore();
+    adminStorage = admin.storage();
+    
+    console.log('✅ Firebase Admin services ready: Auth, Firestore, Storage');
+  } catch (error: any) {
+    console.error('❌ Firebase Admin initialization failed:', error.message);
+    console.error('   Error details:', error);
+    
+    // Create mock instances to prevent crashes
+    adminAuth = {} as admin.auth.Auth;
+    adminDb = {} as admin.firestore.Firestore;
+    adminStorage = {} as admin.storage.Storage;
+    
+    throw new Error(`Firebase Admin initialization failed: ${error.message}`);
+  }
 } else {
-  console.error('❌ Firebase Admin SDK not initialized - missing service account.');
-  console.error('Set FIREBASE_SERVICE_ACCOUNT_PATH in .env to a local service account JSON file or set FIREBASE_PRIVATE_KEY and related env vars.');
-  // provide graceful fallbacks so app doesn't crash in environments without creds
+  console.error('❌ Firebase Admin SDK not initialized - missing service account credentials');
+  console.error('   Required: FIREBASE_SERVICE_ACCOUNT_PATH or FIREBASE_PRIVATE_KEY');
+  console.error('   Set FIREBASE_SERVICE_ACCOUNT_PATH in .env to a local service account JSON file');
+  console.error('   OR set FIREBASE_PRIVATE_KEY and related env vars');
+  
+  // Provide graceful fallbacks so app doesn't crash in environments without creds
   adminAuth = {} as admin.auth.Auth;
   adminDb = {} as admin.firestore.Firestore;
   adminStorage = {} as admin.storage.Storage;
 }
 
+// Export Firebase Admin services
 export { adminAuth, adminDb, adminStorage };
 
+// Export the admin instance for direct SDK access
 export default admin;
